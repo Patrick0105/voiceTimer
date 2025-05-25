@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>語音控制碼表</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+      margin: 0;
+      padding: 0 20px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background-color: #fafafa;
+      color: #222;
+      user-select: none;
+    }
+
+    #timer {
+      font-weight: 700;
+      font-size: 8vw;
+      min-width: 280px;
+      text-align: center;
+      margin-bottom: 3rem;
+      letter-spacing: 0.04em;
+    }
+
+    button {
+      width: 280px;
+      padding: 12px 0;
+      border: none;
+      border-radius: 8px;
+      background-color: #222;
+      color: #fff;
+      font-size: 1.25rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+
+    button:hover,
+    button:focus {
+      background-color: #444;
+      outline: none;
+    }
+
+    #status {
+      margin-top: 2rem;
+      font-size: 1rem;
+      color: #666;
+      font-weight: 400;
+      text-align: center;
+      min-height: 1.5em;
+      max-width: 320px;
+      word-break: break-word;
+    }
+
+    /* 狀態背景色 */
+    body.running {
+      background-color: #e3f9e5;
+    }
+
+    body.paused {
+      background-color: #fff4e5;
+    }
+
+    body.reset {
+      background-color: #fafafa;
+    }
+  </style>
+</head>
+<body class="reset">
+  <div id="timer">00:00:00.00</div>
+  <button onclick="resetTimer()">重置</button>
+  <div id="status">等待語音指令：開始 / 暫停<br><small>請先點擊畫面以啟用音效</small></div>
+
+  <audio id="dingStart" preload="auto" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg"></audio>
+  <audio id="dingStop" preload="auto" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg"></audio>
+
+  <script>
+    const timerDisplay = document.getElementById('timer');
+    const statusDisplay = document.getElementById('status');
+    const dingStart = document.getElementById('dingStart');
+    const dingStop = document.getElementById('dingStop');
+    const body = document.body;
+
+    let startTime = null;
+    let elapsed = 0;
+    let timerInterval = null;
+
+    // 控制是否已經取得用戶互動以允許播放音效
+    let userInteracted = false;
+
+    // 使用者第一次點擊或觸控時，解鎖音效播放權限
+    function unlockAudio() {
+      if (userInteracted) return;
+      userInteracted = true;
+      // 嘗試播放並立即暫停，讓瀏覽器允許後續音效播放
+      dingStart.play().then(() => {
+        dingStart.pause();
+        dingStart.currentTime = 0;
+      }).catch(() => {});
+
+      dingStop.play().then(() => {
+        dingStop.pause();
+        dingStop.currentTime = 0;
+      }).catch(() => {});
+
+      statusDisplay.innerHTML = '等待語音指令：開始 / 暫停';
+      body.removeEventListener('click', unlockAudio);
+      body.removeEventListener('touchstart', unlockAudio);
+    }
+
+    body.addEventListener('click', unlockAudio);
+    body.addEventListener('touchstart', unlockAudio);
+
+    function updateTimer() {
+      const total = elapsed + (startTime ? Date.now() - startTime : 0);
+      const hrs = String(Math.floor(total / 3600000)).padStart(2, '0');
+      const mins = String(Math.floor((total % 3600000) / 60000)).padStart(2, '0');
+      const secs = String(Math.floor((total % 60000) / 1000)).padStart(2, '0');
+      const ms = String(Math.floor((total % 1000) / 10)).padStart(2, '0');
+      timerDisplay.textContent = `${hrs}:${mins}:${secs}.${ms}`;
+    }
+
+    function startTimer() {
+      if (!timerInterval) {
+        startTime = Date.now();
+        timerInterval = setInterval(updateTimer, 10);
+        body.classList.remove('paused', 'reset');
+        body.classList.add('running');
+        statusDisplay.textContent = '狀態：計時中';
+        if (userInteracted) {
+          dingStart.currentTime = 0;
+          dingStart.play().catch(() => {});
+        }
+      }
+    }
+
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        elapsed += Date.now() - startTime;
+        startTime = null;
+        body.classList.remove('running', 'reset');
+        body.classList.add('paused');
+        statusDisplay.textContent = '狀態：已暫停';
+        if (userInteracted) {
+          dingStop.currentTime = 0;
+          dingStop.play().catch(() => {});
+        }
+      }
+    }
+
+    function resetTimer() {
+      stopTimer();
+      elapsed = 0;
+      updateTimer();
+      body.classList.remove('running', 'paused');
+      body.classList.add('reset');
+      statusDisplay.textContent = '狀態：已重置，等待語音指令：開始 / 暫停';
+    }
+
+    // 語音辨識設定
+    window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!window.SpeechRecognition) {
+      statusDisplay.textContent = '瀏覽器不支援語音辨識';
+    } else {
+      const recognition = new window.SpeechRecognition();
+      recognition.lang = 'zh-TW';
+      recognition.continuous = true;
+      recognition.interimResults = false;
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[event.results.length -1][0].transcript.trim();
+        console.log('辨識結果:', transcript);
+        statusDisplay.textContent = `辨識結果：${transcript}`;
+        if (transcript.includes('開始') || transcript.includes('繼續')) {
+          startTimer();
+        } else if (transcript.includes('暫停') || transcript.includes('停止') || transcript.includes('結束') || transcript.includes('停') || transcript.includes('電影') || transcript.includes('婷婷')) {
+          stopTimer();
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.error('語音辨識錯誤', event.error);
+        statusDisplay.textContent = '語音辨識錯誤，請重試';
+      };
+
+      recognition.onend = () => {
+        recognition.start();
+      };
+
+      recognition.start();
+    }
+
+    updateTimer();
+  </script>
+</body>
+</html>
