@@ -23,6 +23,7 @@
       background-color: #fafafa;
       color: #222;
       user-select: none;
+      position: relative;
     }
 
     #timer {
@@ -32,6 +33,7 @@
       text-align: center;
       margin-bottom: 3rem;
       letter-spacing: 0.04em;
+      display: none; /* 預設隱藏 */
     }
 
     button {
@@ -53,6 +55,11 @@
       outline: none;
     }
 
+    #resetButton {
+      display: none; /* 預設隱藏 */
+      margin-top: 1rem;
+    }
+
     #status {
       margin-top: 2rem;
       font-size: 1rem;
@@ -62,6 +69,23 @@
       min-height: 1.5em;
       max-width: 320px;
       word-break: break-word;
+    }
+
+    #overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: rgba(0,0,0,0.7);
+      color: white;
+      font-weight: 700;
+      font-size: 2rem;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      user-select: none;
+      cursor: pointer;
+      z-index: 9999;
+      text-align: center;
+      padding: 20px;
     }
 
     /* 狀態背景色 */
@@ -79,9 +103,10 @@
   </style>
 </head>
 <body class="reset">
+  <div id="overlay">點擊畫面開始辨識</div>
+
   <div id="timer">00:00:00.00</div>
-  <button onclick="resetTimer()">重置</button>
-  <div id="status">等待語音指令：開始 / 暫停<br><small>請先點擊畫面以啟用音效</small></div>
+  <button id="resetButton" onclick="resetTimer()">重置</button>
 
   <audio id="dingStart" preload="auto" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg"></audio>
   <audio id="dingStop" preload="auto" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg"></audio>
@@ -92,36 +117,14 @@
     const dingStart = document.getElementById('dingStart');
     const dingStop = document.getElementById('dingStop');
     const body = document.body;
+    const overlay = document.getElementById('overlay');
+    const resetButton = document.getElementById('resetButton');
 
     let startTime = null;
     let elapsed = 0;
     let timerInterval = null;
-
-    // 控制是否已經取得用戶互動以允許播放音效
     let userInteracted = false;
-
-    // 使用者第一次點擊或觸控時，解鎖音效播放權限
-    function unlockAudio() {
-      if (userInteracted) return;
-      userInteracted = true;
-      // 嘗試播放並立即暫停，讓瀏覽器允許後續音效播放
-      dingStart.play().then(() => {
-        dingStart.pause();
-        dingStart.currentTime = 0;
-      }).catch(() => {});
-
-      dingStop.play().then(() => {
-        dingStop.pause();
-        dingStop.currentTime = 0;
-      }).catch(() => {});
-
-      statusDisplay.innerHTML = '等待語音指令：開始 / 暫停';
-      body.removeEventListener('click', unlockAudio);
-      body.removeEventListener('touchstart', unlockAudio);
-    }
-
-    body.addEventListener('click', unlockAudio);
-    body.addEventListener('touchstart', unlockAudio);
+    let recognition = null;
 
     function updateTimer() {
       const total = elapsed + (startTime ? Date.now() - startTime : 0);
@@ -171,38 +174,62 @@
       statusDisplay.textContent = '狀態：已重置，等待語音指令：開始 / 暫停';
     }
 
-    // 語音辨識設定
-    window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!window.SpeechRecognition) {
-      statusDisplay.textContent = '瀏覽器不支援語音辨識';
-    } else {
-      const recognition = new window.SpeechRecognition();
-      recognition.lang = 'zh-TW';
-      recognition.continuous = true;
-      recognition.interimResults = false;
+    // 點擊整個覆蓋層解鎖音效與啟動語音辨識
+    overlay.addEventListener('click', () => {
+      if (userInteracted) return;
+      userInteracted = true;
 
-      recognition.onresult = (event) => {
-        const transcript = event.results[event.results.length -1][0].transcript.trim();
-        console.log('辨識結果:', transcript);
-        statusDisplay.textContent = `辨識結果：${transcript}`;
-        if (transcript.includes('開始') || transcript.includes('繼續')) {
-          startTimer();
-        } else if (transcript.includes('暫停') || transcript.includes('停止') || transcript.includes('結束') || transcript.includes('停') || transcript.includes('電影') || transcript.includes('婷婷')) {
-          stopTimer();
-        }
-      };
+      // 隱藏覆蓋層，顯示碼表與按鈕
+      overlay.style.display = 'none';
+      timerDisplay.style.display = 'block';
+      resetButton.style.display = 'block';
+      statusDisplay.textContent = '等待語音指令：開始 / 暫停';
 
-      recognition.onerror = (event) => {
-        console.error('語音辨識錯誤', event.error);
-        statusDisplay.textContent = '語音辨識錯誤，請重試';
-      };
+      // 嘗試播放音效解鎖
+      dingStart.play().then(() => {
+        dingStart.pause();
+        dingStart.currentTime = 0;
+      }).catch(() => {});
+      dingStop.play().then(() => {
+        dingStop.pause();
+        dingStop.currentTime = 0;
+      }).catch(() => {});
 
-      recognition.onend = () => {
+      // 啟動語音辨識
+      if (window.SpeechRecognition || window.webkitSpeechRecognition) {
+        window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new window.SpeechRecognition();
+        recognition.lang = 'zh-TW';
+        recognition.continuous = true;
+        recognition.interimResults = false;
+
+        recognition.onresult = (event) => {
+          const transcript = event.results[event.results.length - 1][0].transcript.trim();
+          console.log('辨識結果:', transcript);
+          statusDisplay.textContent = `辨識結果：${transcript}`;
+          if (transcript.includes('開始') || transcript.includes('繼續')) {
+            startTimer();
+          } else if (transcript.includes('暫停') || transcript.includes('停止') || transcript.includes('結束') || transcript.includes('停') || transcript.includes('電影') || transcript.includes('婷婷')) {
+            stopTimer();
+          }
+        };
+
+        recognition.onerror = (event) => {
+          console.error('語音辨識錯誤', event.error);
+          statusDisplay.textContent = '語音辨識錯誤，請重試';
+        };
+
+        recognition.onend = () => {
+          recognition.start();
+        };
+
         recognition.start();
-      };
+      } else {
+        statusDisplay.textContent = '瀏覽器不支援語音辨識';
+      }
 
-      recognition.start();
-    }
+      updateTimer();
+    });
 
     updateTimer();
   </script>
